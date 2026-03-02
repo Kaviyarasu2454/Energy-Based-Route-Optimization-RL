@@ -43,6 +43,27 @@ class Dijkstra:
         edge_path = []
         current = self.env.end_node
 
+# If end was never reached
+        if current not in predecessor and current != self.env.start_node:
+            return [], [], 0, 0, 0
+
+        while current != self.env.start_node:
+
+            if current not in predecessor:
+                return [], [], 0, 0, 0
+
+            node_path.append(current)
+            prev = predecessor[current]
+
+            edges = set(self.env.decode_node_to_edges(prev, 'outgoing')) & \
+                    set(self.env.decode_node_to_edges(current, 'incoming'))
+
+            if not edges:
+                return [], [], 0, 0, 0
+
+            edge_path.append(next(iter(edges)))
+            current = prev
+
         while current != self.env.start_node:
             node_path.append(current)
             prev = predecessor[current]
@@ -112,6 +133,27 @@ class AStar:
         node_path = []
         edge_path = []
         current = self.env.end_node
+
+# If end was never reached
+        if current not in predecessor and current != self.env.start_node:
+            return [], [], 0, 0, 0
+
+        while current != self.env.start_node:
+
+            if current not in predecessor:
+                return [], [], 0, 0, 0
+
+            node_path.append(current)
+            prev = predecessor[current]
+
+            edges = set(self.env.decode_node_to_edges(prev, 'outgoing')) & \
+                    set(self.env.decode_node_to_edges(current, 'incoming'))
+
+            if not edges:
+                return [], [], 0, 0, 0
+
+            edge_path.append(next(iter(edges)))
+            current = prev
 
         while current != self.env.start_node:
             node_path.append(current)
