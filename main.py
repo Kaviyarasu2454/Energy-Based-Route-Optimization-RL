@@ -53,53 +53,91 @@ if __name__ == '__main__':
 
     network_file = './network_files/kelambakkam.net.xml'
 
-    # Load net for plotting + click selection
+    # Load network
     net = sumolib.net.readNet(network_file)
     nodes = list(net.getNodes())
     edges = list(net.getEdges())
 
-    # Create environment for algorithms
+    # Create environment
     env = environment.traffic_env(
         network_file=network_file,
         evaluation="energy",
         congestion_level="medium"
     )
 
-    # ----------------------------
-    # Step 1: Let user select start/end by clicking
-    # ----------------------------
-    fig, ax = plt.subplots(figsize=(10, 8))
-    draw_network_gray(ax, edges)
+    # ==============================
+    # STEP 1: Interactive Selection with Validation
+    # ==============================
 
-    ax.set_title("Click START then DESTINATION")
-    ax.axis("equal")
-    ax.axis("off")
+    while True:
 
-    print("Click START then DESTINATION on map...")
+        fig, ax = plt.subplots(figsize=(10, 8))
+        draw_network_gray(ax, edges)
 
-    clicks = plt.ginput(2, timeout=-1)
-    (sx, sy), (ex, ey) = clicks
+        ax.set_title("Click START then DESTINATION")
+        ax.axis("equal")
+        ax.axis("off")
 
-    start_node = nearest_node(net, nodes, sx, sy)
-    end_node = nearest_node(net, nodes, ex, ey)
+        print("\nClick START then DESTINATION on map...")
 
-    # Mark start/end
-    sxc, syc = net.getNode(start_node).getCoord()
-    exc, eyc = net.getNode(end_node).getCoord()
+        clicks = plt.ginput(2, timeout=-1)
 
-    ax.scatter([sxc], [syc], s=100, color="red", zorder=6)
-    ax.scatter([exc], [eyc], s=100, color="red", zorder=6)
-    ax.text(sxc, syc, " START", fontsize=10, fontweight="bold", color="red")
-    ax.text(exc, eyc, " END", fontsize=10, fontweight="bold", color="red")
-    plt.draw()
+        if len(clicks) < 2:
+            print("❌ Selection cancelled. Please select two nodes.")
+            plt.close(fig)
+            continue
 
-    print("\nSelected Nodes:")
-    print("Start:", start_node)
-    print("End:", end_node)
+        (sx, sy), (ex, ey) = clicks
 
-    # ----------------------------
-    # Step 2: Run Dijkstra + A*
-    # ----------------------------
+        start_node = nearest_node(net, nodes, sx, sy)
+        end_node = nearest_node(net, nodes, ex, ey)
+
+        print("\nSelected Nodes:")
+        print("Start:", start_node)
+        print("End:", end_node)
+
+        # -------- VALIDATION --------
+
+        if start_node == end_node:
+            print("❌ Rejected: Start and Destination are the same node.")
+            plt.close(fig)
+            continue
+
+        if not env.decode_node_to_edges(start_node, 'outgoing'):
+            print("❌ Rejected: Start node has no outgoing roads (dead end).")
+            plt.close(fig)
+            continue
+
+        if not env.decode_node_to_edges(end_node, 'incoming'):
+            print("❌ Rejected: Destination node has no incoming roads.")
+            plt.close(fig)
+            continue
+
+        test_node_path, test_edge_path, _, _, _ = \
+            dijkstra.Dijkstra(env, start_node, end_node).search()
+
+        if not test_node_path:
+            print("❌ Rejected: No reachable path exists (one-way restriction or disconnected network).")
+            plt.close(fig)
+            continue
+
+        print("✅ Valid selection. Running algorithms...\n")
+
+        # Mark start/end
+        sxc, syc = net.getNode(start_node).getCoord()
+        exc, eyc = net.getNode(end_node).getCoord()
+
+        ax.scatter([sxc], [syc], s=120, color="red", zorder=6)
+        ax.scatter([exc], [eyc], s=120, color="red", zorder=6)
+        ax.text(sxc, syc, " START", fontsize=10, fontweight="bold", color="red")
+        ax.text(exc, eyc, " END", fontsize=10, fontweight="bold", color="red")
+
+        break
+
+    # ==============================
+    # STEP 2: Run Dijkstra + A*
+    # ==============================
+
     print("\nRunning Distance-Based Algorithms...\n")
 
     d_node, d_edge, d_dist, d_time, d_energy = \
@@ -108,9 +146,10 @@ if __name__ == '__main__':
     a_node, a_edge, a_dist, a_time, a_energy = \
         dijkstra.AStar(env, start_node, end_node).search()
 
-    # ----------------------------
-    # Step 3: Run RL (Energy-Based)
-    # ----------------------------
+    # ==============================
+    # STEP 3: Run RL
+    # ==============================
+
     print("\nTraining Reinforcement Learning Agent...\n")
 
     rl_agent = agent.Q_Learning(env, start_node, end_node)
@@ -120,9 +159,10 @@ if __name__ == '__main__':
     rl_time = env.get_edge_time(rl_edge)
     rl_energy = env.get_edge_energy(rl_edge)
 
-    # ----------------------------
-    # Step 4: Print Comparison
-    # ----------------------------
+    # ==============================
+    # STEP 4: Print Comparison
+    # ==============================
+
     print("\n=========== ALGORITHM COMPARISON ===========")
 
     print("\nRL (Energy-Aware)")
@@ -140,19 +180,15 @@ if __name__ == '__main__':
     print("Time:", round(a_time, 2), "min")
     print("Energy:", round(a_energy, 4), "KWh")
 
-    # Optional energy savings
     if d_energy > 0:
         savings = ((d_energy - rl_energy) / d_energy) * 100
         print("\nEnergy Savings vs Dijkstra:", round(savings, 2), "%")
 
-    # ----------------------------
-    # Step 5: Plot routes on SAME MAP
-    # ----------------------------
-    # Keep background gray; overlay RL route thick green.
+    # ==============================
+    # STEP 5: Draw RL Route
+    # ==============================
+
     draw_route(ax, net, rl_edge, color="green", width=4, zorder=5)
 
-    # Optional: also show Dijkstra path (thin blue) for comparison
-    # draw_route(ax, net, d_edge, color="blue", width=2, zorder=4)
-
-    ax.set_title("Optimized Energy Route (RL) with Start/End")
+    ax.set_title("Optimized Energy Route (RL)")
     plt.show()
