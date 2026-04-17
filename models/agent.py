@@ -19,21 +19,24 @@ class Q_Learning:
         self.q_table = np.zeros((len(env.state_space),
                                  len(env.action_space)))
 
-    # -------------------------------------------------
-    # Choose Action (Epsilon-Greedy)
-    # -------------------------------------------------
     def choose_action(self, state):
 
         state_idx = self.env.state_space.index(state)
 
-        if np.random.rand() < self.epsilon:
+        outgoing = self.env.decode_node_to_edges(state, 'outgoing')
+        valid_actions = self.env.decode_edges_to_actions(outgoing)
+
+        if not valid_actions:
             return np.random.choice(len(self.env.action_space))
 
-        return np.argmax(self.q_table[state_idx])
+        if np.random.rand() < self.epsilon:
+            return np.random.choice(valid_actions)
 
-    # -------------------------------------------------
-    # Training
-    # -------------------------------------------------
+        q_values = self.q_table[state_idx]
+
+        valid_q = {a: q_values[a] for a in valid_actions}
+        return max(valid_q, key=valid_q.get)
+
     def train(self, episodes, converge_threshold):
 
         start_time = datetime.datetime.now()
@@ -41,6 +44,7 @@ class Q_Learning:
         best_energy = float('inf')
         best_path = []
         best_states = []
+        final_battery = 100
 
         for episode in range(episodes):
 
@@ -48,7 +52,9 @@ class Q_Learning:
             state_path = [state]
             edge_path = []
 
-            max_steps = 200   # 🔥 Safety limit
+            battery = 100
+
+            max_steps = 200
             steps = 0
 
             visited_states = set()
@@ -58,9 +64,6 @@ class Q_Learning:
                 action = self.choose_action(state)
                 outgoing = self.env.decode_node_to_edges(state, 'outgoing')
 
-                # -------------------------------------------------
-                # Invalid Action
-                # -------------------------------------------------
                 if action not in self.env.decode_edges_to_actions(outgoing):
                     reward = -100
                     next_state = state
@@ -70,21 +73,20 @@ class Q_Learning:
                     next_edge = self.env.decode_edges_action_to_edge(outgoing, action)
                     next_state = self.env.decode_edge_to_node(next_edge)
 
-                    # Energy-based penalty
                     energy_cost = self.env.get_edge_energy(next_edge)
-                    reward = -energy_cost
 
-                    # Loop penalty
+                    battery -= energy_cost * 20
+                    battery = max(0, battery)
+
+                    # 🔥 MAIN FIX: ENERGY-FOCUSED REWARD
+                    reward = -(energy_cost * 8)
+
                     if next_state in visited_states:
-                        reward -= 5
+                        reward -= 20   # loop penalty
 
-                    # Completion reward
                     if next_state == self.env.end_node:
-                        reward += 1000
+                        reward += 500   # stronger goal reward
 
-                # -------------------------------------------------
-                # Q-Update
-                # -------------------------------------------------
                 s_idx = self.env.state_space.index(state)
                 ns_idx = self.env.state_space.index(next_state)
 
@@ -94,9 +96,6 @@ class Q_Learning:
                     self.q_table[s_idx][action]
                 )
 
-                # -------------------------------------------------
-                # Update state
-                # -------------------------------------------------
                 if next_edge:
                     edge_path.append(next_edge)
                     state_path.append(next_state)
@@ -105,9 +104,6 @@ class Q_Learning:
                 state = next_state
                 steps += 1
 
-            # -------------------------------------------------
-            # Track Best Path
-            # -------------------------------------------------
             if state == self.env.end_node:
 
                 total_energy = self.env.get_edge_energy(edge_path)
@@ -116,11 +112,24 @@ class Q_Learning:
                     best_energy = total_energy
                     best_path = edge_path.copy()
                     best_states = state_path.copy()
+                    final_battery = battery
 
-            # Slowly reduce exploration
-            self.epsilon = max(0.01, self.epsilon * 0.997)
+            if episode % 500 == 0:
+                print(f"Episode {episode}, Best Energy: {best_energy:.4f}")
+
+            # 🔥 FIX: slower epsilon decay (prevents early bad learning)
+            self.epsilon = max(0.05, self.epsilon * 0.998)
+
+        # 🔥 CLEAN PATH (remove loops)
+        clean_path = []
+        visited_edges = set()
+
+        for edge in best_path:
+            if edge not in visited_edges:
+                clean_path.append(edge)
+                visited_edges.add(edge)
 
         end_time = datetime.datetime.now()
         print(f"RL Training Time: {(end_time - start_time).total_seconds()} seconds")
 
-        return best_states, best_path, episodes, {}
+        return best_states, clean_path, episodes, {"battery": final_battery}

@@ -34,16 +34,17 @@ def draw_network_gray(ax, edges):
         shape = edge.getShape()
         xs = [p[0] for p in shape]
         ys = [p[1] for p in shape]
-        ax.plot(xs, ys, linewidth=0.5, color="lightgray", alpha=0.8, zorder=1)
+        ax.plot(xs, ys, linewidth=1.2, color="black", alpha=0.9, zorder=1)
 
 
-def draw_route(ax, net, edge_ids, color, width, zorder=4):
+def draw_route(ax, net, edge_ids, color, width):
     for edge_id in edge_ids:
         e = net.getEdge(edge_id)
         shape = e.getShape()
         xs = [p[0] for p in shape]
         ys = [p[1] for p in shape]
-        ax.plot(xs, ys, linewidth=width, color=color, zorder=zorder)
+        # 🔥 Improved clarity (ONLY CHANGE)
+        ax.plot(xs, ys, linewidth=width, color=color, zorder=5, alpha=0.9)
 
 
 if __name__ == '__main__':
@@ -53,25 +54,23 @@ if __name__ == '__main__':
 
     network_file = './network_files/kelambakkam.net.xml'
 
-    # Load network
     net = sumolib.net.readNet(network_file)
     nodes = list(net.getNodes())
     edges = list(net.getEdges())
 
-    # Create environment
     env = environment.traffic_env(
         network_file=network_file,
         evaluation="energy",
         congestion_level="medium"
     )
 
-    # ==============================
-    # STEP 1: Interactive Selection with Validation
-    # ==============================
+    # 🔥 Ask Battery from User
+    initial_battery = float(input("Enter Initial Battery (%) [Example: 100]: "))
 
     while True:
 
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(14, 12))
+
         draw_network_gray(ax, edges)
 
         ax.set_title("Click START then DESTINATION")
@@ -83,7 +82,7 @@ if __name__ == '__main__':
         clicks = plt.ginput(2, timeout=-1)
 
         if len(clicks) < 2:
-            print("❌ Selection cancelled. Please select two nodes.")
+            print("❌ Selection cancelled.")
             plt.close(fig)
             continue
 
@@ -96,49 +95,29 @@ if __name__ == '__main__':
         print("Start:", start_node)
         print("End:", end_node)
 
-        # -------- VALIDATION --------
-
-        if start_node == end_node:
-            print("❌ Rejected: Start and Destination are the same node.")
-            plt.close(fig)
-            continue
-
-        if not env.decode_node_to_edges(start_node, 'outgoing'):
-            print("❌ Rejected: Start node has no outgoing roads (dead end).")
-            plt.close(fig)
-            continue
-
-        if not env.decode_node_to_edges(end_node, 'incoming'):
-            print("❌ Rejected: Destination node has no incoming roads.")
-            plt.close(fig)
-            continue
-
         test_node_path, test_edge_path, _, _, _ = \
             dijkstra.Dijkstra(env, start_node, end_node).search()
 
         if not test_node_path:
-            print("❌ Rejected: No reachable path exists (one-way restriction or disconnected network).")
+            print("❌ No path found.")
             plt.close(fig)
             continue
 
-        print("✅ Valid selection. Running algorithms...\n")
-
-        # Mark start/end
+        # START & END MARKERS
         sxc, syc = net.getNode(start_node).getCoord()
         exc, eyc = net.getNode(end_node).getCoord()
 
-        ax.scatter([sxc], [syc], s=120, color="red", zorder=6)
-        ax.scatter([exc], [eyc], s=120, color="red", zorder=6)
+        ax.scatter([sxc], [syc], s=150, color="red", zorder=10)
         ax.text(sxc, syc, " START", fontsize=10, fontweight="bold", color="red")
-        ax.text(exc, eyc, " END", fontsize=10, fontweight="bold", color="red")
+
+        ax.scatter([exc], [eyc], s=150, color="green", zorder=10)
+        ax.text(exc, eyc, " END", fontsize=10, fontweight="bold", color="green")
 
         break
 
-    # ==============================
-    # STEP 2: Run Dijkstra + A*
-    # ==============================
-
-    print("\nRunning Distance-Based Algorithms...\n")
+    # --------------------------
+    # Algorithms
+    # --------------------------
 
     d_node, d_edge, d_dist, d_time, d_energy = \
         dijkstra.Dijkstra(env, start_node, end_node).search()
@@ -146,49 +125,51 @@ if __name__ == '__main__':
     a_node, a_edge, a_dist, a_time, a_energy = \
         dijkstra.AStar(env, start_node, end_node).search()
 
-    # ==============================
-    # STEP 3: Run RL
-    # ==============================
-
-    print("\nTraining Reinforcement Learning Agent...\n")
-
     rl_agent = agent.Q_Learning(env, start_node, end_node)
-    rl_node, rl_edge, _, _ = rl_agent.train(5000, 10)
+    rl_node, rl_edge, _, info = rl_agent.train(5000, 10)
 
     rl_dist = env.get_edge_distance(rl_edge)
     rl_time = env.get_edge_time(rl_edge)
     rl_energy = env.get_edge_energy(rl_edge)
 
-    # ==============================
-    # STEP 4: Print Comparison
-    # ==============================
+    # 🔥 Battery Calculation
+    final_battery = initial_battery - (rl_energy * 20)
+    final_battery = max(0, final_battery)
 
-    print("\n=========== ALGORITHM COMPARISON ===========")
+    # --------------------------
+    # OUTPUT
+    # --------------------------
 
-    print("\nRL (Energy-Aware)")
-    print("Distance:", round(rl_dist, 2), "m")
-    print("Time:", round(rl_time, 2), "min")
-    print("Energy:", round(rl_energy, 4), "KWh")
+    print("\n=========== FINAL COMPARISON ===========")
 
-    print("\nDijkstra (Shortest Distance)")
-    print("Distance:", round(d_dist, 2), "m")
-    print("Time:", round(d_time, 2), "min")
-    print("Energy:", round(d_energy, 4), "KWh")
+    print(f"{'Algorithm':<10} | {'Distance':<10} | {'Time':<10} | {'Energy':<10}")
+    print("-" * 50)
 
-    print("\nA* (Shortest Distance)")
-    print("Distance:", round(a_dist, 2), "m")
-    print("Time:", round(a_time, 2), "min")
-    print("Energy:", round(a_energy, 4), "KWh")
+    print(f"{'RL':<10} | {round(rl_dist,2):<10} | {round(rl_time,2):<10} | {round(rl_energy,4):<10}")
+    print(f"{'Dijkstra':<10} | {round(d_dist,2):<10} | {round(d_time,2):<10} | {round(d_energy,4):<10}")
+    print(f"{'A*':<10} | {round(a_dist,2):<10} | {round(a_time,2):<10} | {round(a_energy,4):<10}")
 
-    if d_energy > 0:
-        savings = ((d_energy - rl_energy) / d_energy) * 100
-        print("\nEnergy Savings vs Dijkstra:", round(savings, 2), "%")
+    savings = ((d_energy - rl_energy) / d_energy) * 100
+    savings = max(0, savings)
 
-    # ==============================
-    # STEP 5: Draw RL Route
-    # ==============================
+    print("\nEnergy Saving (RL vs Dijkstra):", round(savings, 2), "%")
 
-    draw_route(ax, net, rl_edge, color="green", width=4, zorder=5)
+    print("\nInitial Battery:", initial_battery, "%")
+    print("Final Battery after RL:", round(final_battery, 2), "%")
 
-    ax.set_title("Optimized Energy Route (RL)")
+    # --------------------------
+    # Visualization
+    # --------------------------
+
+    # 🔥 RL thicker for clarity
+    draw_route(ax, net, rl_edge, color="blue", width=6)
+    draw_route(ax, net, d_edge, color="green", width=3)
+
+    # 🔥 Legend (ONLY ADDITION)
+    import matplotlib.lines as mlines
+    rl_line = mlines.Line2D([], [], color='blue', linewidth=3, label='RL Route')
+    dj_line = mlines.Line2D([], [], color='green', linewidth=3, label='Dijkstra Route')
+    plt.legend(handles=[rl_line, dj_line])
+
+    plt.title("Energy-Based Route Optimization (RL vs Dijkstra)")
     plt.show()

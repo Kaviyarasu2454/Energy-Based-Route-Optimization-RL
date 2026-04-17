@@ -123,7 +123,7 @@ class traffic_env:
 
         total_energy = 0
 
-        base_consumption = 0.2  # kWh per km
+        base_consumption = 0.15 + (self.travel_speed/500)  # kWh per km
 
         for edge in travel_edges:
 
